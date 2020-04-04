@@ -181,13 +181,11 @@
             class Prey extends Drawable {
                 // we will represent prey as a circle of radius "boundingRadius"
 
-                maxMoveLength = 2;
-                viewAngle = degToRad(270);
-                turnStep = degToRad(4); // degrees maximum turn per step
-
                 constructor(id, x, y, orientation) {
                     super(id, x, y, orientation, preyRadius, preyFillStyle, preyStrokeStyle);
-
+                    this.maxMoveLength = 2
+                    this.viewAngle = degToRad(270);
+                    this.turnStep = degToRad(4); // degrees maximum turn per step
                 }
 
                 draw() {
@@ -347,12 +345,13 @@
             class Predator extends Drawable {
                 // we will represent prey as a circle of radius "boundingRadius"
 
-                maxMoveLength = 3;
-                viewAngle = degToRad(180);
-                turnStep = degToRad(1); // degrees maximum gurn per step
 
                 constructor(id, x, y, orientation) {
                     super(id, x, y, orientation, predatorRadius, predatorFillStyle, predatorStrokeStyle);
+
+                    this.maxMoveLength = 3;
+                    this.viewAngle = degToRad(180);
+                    this.turnStep = degToRad(1); // degrees maximum gurn per step
                 }
 
                 move() {
