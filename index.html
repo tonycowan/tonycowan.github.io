@@ -17,499 +17,386 @@
         <p>Add suitable fallback here.</p>
     </canvas>
     <script>
-            const canvas = document.querySelector('.myCanvas');
-            const canvasWidth = canvas.width = window.innerWidth;
-            const canvasHeight = canvas.height = window.innerHeight;
-            const ctx = canvas.getContext('2d');
-            const backgroundColor = 'rgb(0, 0, 0)';
-            const preyFillStyle = 'rgb(0, 0, 255)';
-            const preyStrokeStyle = 'rgb(255, 255, 255)';
-            const predatorFillStyle = 'rgb(255, 0, 0)';
-            const predatorStrokeStyle = 'rgb(255, 255, 255)';
-            const beakColor = 'rgb(200,150,25)';
+        const canvas = document.querySelector('.myCanvas');
+        const canvasWidth = canvas.width = window.innerWidth;
+        const canvasHeight = canvas.height = window.innerHeight;
+        const ctx = canvas.getContext('2d');
+        const backgroundColorMaker = (alpha) => `rgba(0, 0, 0, ${alpha})`;
+        const preyFillStyleMaker = (alpha) => `rgba(0, 0, 255, ${alpha})`;
+        const preyStrokeStyleMaker = (alpha) => `rgba(255, 255, 255, ${alpha})`;
+        const predatorFillStyleMaker = (alpha) => `rgba(255, 0, 0, ${alpha})`;
+        const predatorStrokeStyleMaker = (alpha) => `rgba(255, 255, 255, ${alpha})`;
+        const beakStyleMaker = (alpha) => `rgba(200,150,25, ${alpha})`;
+        const numberStyleMaker = (alpha) => `rgba(255, 255, 255, ${alpha})`;
+        const organismStatuses = Object.freeze({ alive: 'alive', dead: 'dead' });
+        const forceDirections = Object.freeze({ attraction: 1, repulsion: -1 });
 
-            const movesPerSimulation = 2000;
+        const movesPerSimulation = 2000;
 
-            const preyCount = 30;
-            let preyList = [];
+        let preyList = [];
+        let predatorList = [];
 
-            const predatorCount = 1;
-            let predatorList = [];
+        const preyRadius = 20;
+        const predatorRadius = 30;
 
-            const preyRadius = 20;
-            const predatorRadius = 30;
+        function colorMaker(r, g, b) {
+            return a => `rgba(${r}, ${g}, ${b}, ${a})`;
+        }
 
-            function degToRad(degrees) {
-                return degrees * Math.PI / 180;
+        function degToRad(degrees) {
+            return degrees * Math.PI / 180;
+        };
+
+        function rotate(point, rad) {
+            // x2=cosβx1−sinβy1
+            // y2=sinβx1+cosβy1
+
+            const x2 = Math.cos(rad) * point.x - Math.sin(rad) * point.y;
+            const y2 = Math.sin(rad) * point.x + Math.cos(rad) * point.y;
+
+            return { x: x2, y: y2 };
+        };
+
+        function rand(min, max) {
+            const result = Math.floor(Math.random() * (max - min + 1)) + (min);
+            return result;
+        }
+        // put 0,0 in the middle of the screen
+        ctx.translate(canvasWidth / 2, canvasHeight / 2);
+
+        function initialize() {
+            // erase the screen to the background color
+            ctx.fillStyle = backgroundColorMaker(1);
+            ctx.fillRect(-(canvasWidth / 2), -(canvasHeight / 2), canvasWidth, canvasHeight);
+
+            preyList.length = 0;
+            predatorList.length = 0;
+
+            const preyCount = rand(10, 30);
+            const predatorCount = rand(0,2);
+
+            for (let i = 0; i < preyCount; i++) {
+                const prey = new Prey(i);
+                preyList.push(prey);
+            }
+
+            preyList.forEach(prey => console.log(`id: ${prey.id}, x:${prey.x}, y:${prey.y}, orientation:${prey.orientation}`));
+
+            for (let i = 0; i < predatorCount; i++) {
+                const predator = new Predator(i);
+                predatorList.push(predator);
+                console.log(predator);
+            }
+
+        }
+
+        // calculate where the critter should point in the next step of simulation
+        function newOrientation(orientation, sum, turnStep) {
+            // if there is no motivation to turn, you're probably pointed away from all the action, so turn around
+            if (sum.x == 0 && sum.y == 0)
+                sum = { x: 5, y: 5 };
+            else
+                sum = rotate(sum, -orientation); // this makes the orientationToForceAngle maths easier
+
+            const unitOrientation = { x: 1, y: 0 }; // this makes the orientationToForceAngle maths easier
+            const orientationToForceAngle = Math.sign(sum.y - unitOrientation.y) *
+                Math.acos(
+                    (sum.x || sum.y) ?
+                        Math.round((sum.x * unitOrientation.x + sum.y * unitOrientation.y) / Math.sqrt(sum.x * sum.x + sum.y * sum.y) * 10000) / 10000 :
+                        0);
+
+            let changeInOrientation = 0;
+            if (Math.abs(orientationToForceAngle) <= turnStep) {
+                changeInOrientation = orientationToForceAngle;
+            } else {
+                changeInOrientation = Math.sign(orientationToForceAngle) * turnStep;
+            }
+            let newOrientation = (orientation + changeInOrientation);
+            if (newOrientation < -Math.PI) newOrientation += 2 * Math.PI;
+            if (newOrientation > Math.PI) newOrientation -= 2 * Math.PI;
+            //console.log(`old: ${orientation}, new: ${newOrientation}, otfa: ${orientationToForceAngle}, uo: (${unitOrientation.x},${unitOrientation.y}), sum: (${sum.x}, ${sum.y})`);    
+
+            return newOrientation;
+        }
+
+        function boundsCheck(x, min, max) {
+            x = x > max ? max : x;
+            x = x < min ? min : x;
+
+            return x;
+        }
+
+        // can o1 see o2?
+        function organism1CanSeeOrganism2(o1x, o1y, o1orientation, o1viewAngle, o2x, o2y) {
+            const unitOrientation = { x: Math.cos(o1orientation), y: Math.sin(o1orientation) };
+            const vectorToOther = { x: o2x - o1x, y: o2y - o1y };
+            const angleToOther = Math.acos((vectorToOther.x) / Math.sqrt(vectorToOther.x * vectorToOther.x + vectorToOther.y * vectorToOther.y)) * Math.sign(vectorToOther.y);
+            const unitOther = { x: Math.cos(angleToOther), y: Math.sin(angleToOther) };
+            const orientationToOther = Math.acos((unitOther.x * unitOrientation.x + unitOther.y * unitOrientation.y));
+            return Math.abs(orientationToOther) <= Math.abs(o1viewAngle / 2);
+        }
+
+        function calculateInfluence(organism, collection, direction, offset) {
+            const influence = collection.reduce((a, individual) => {
+                // ignore dead things
+                if (individual.status == organismStatuses.dead) return a;
+                // ignore the organism itself
+                if (individual === organism) return a;
+
+                // organisms are only influenced by what they can see
+                const inView = organism1CanSeeOrganism2(organism.x, organism.y, organism.orientation, organism.viewAngle, individual.x, individual.y);
+
+                if (inView) {
+                    const bloodCircle = individual.sphereOfControl - organism.sphereOfControl;
+                    const centerToCenter = { x: (individual.x - organism.x) * direction, y: (individual.y - organism.y) * direction };
+                    const centerToCenterDistance = Math.sqrt(centerToCenter.x * centerToCenter.x + centerToCenter.y * centerToCenter.y);
+
+                    const x = (centerToCenterDistance > 0 ? Math.round(centerToCenter.x) : 0) * (1 - (offset / centerToCenterDistance));
+                    const y = (centerToCenterDistance > 0 ? Math.round(centerToCenter.y) : 0) * (1 - (offset / centerToCenterDistance));
+                    const distance = Math.sqrt(x * x + y * y);
+
+                    const vector = { from: individual.id, to: organism.id, centerToCenter, distance, x, y };
+                    vector.inPanicDistance = centerToCenterDistance <= organism.panicDistance;
+                    vector.inBloodCircle = Math.floor(centerToCenterDistance) <= bloodCircle;
+                    vector.inPersonalSpace = centerToCenterDistance <= organism.personalSpace;
+
+                    a.push(vector);
+                }
+
+                return a;
+            }, []);
+
+            return influence;
+        }
+
+        function calculateDelta(organism, cohort, prey, predators) {
+
+            // let every other prey influence this prey in inverse
+            // proportion to the distance between them
+
+            // prey attempt to maintain a constant distance of one radius 
+            // from all other prey
+
+            // prey can move at most maxMoveLength per move only in the direction of orientation.
+            // prey can turn at most "turnstep" (e.g.: 5) degrees at a time
+
+            // prey cannot move off the screen
+
+            const defaultReturn = { x: organism.x, y: organism.y, orientation: organism.orientation, status: organism.status };
+
+            // no updates if the organism is dead
+            if (organism.status == organismStatuses.dead) {
+                return defaultReturn;
+            }
+
+            // first aversion to predators
+            // ****************************************************
+
+            const rawPredatorInfluence = calculateInfluence(organism, predators, forceDirections.repulsion, 0);
+            const predatorInfluence = rawPredatorInfluence.map(p => {
+                const distance = Math.sqrt(p.x * p.x + p.y * p.y);
+                const divisor = distance * distance / 50; // influence is inversely proportional to the square of the distance
+                const unit = { from: p.from, to: p.to, vx: p.x, vy: p.y, inBloodCircle: p.inBloodCircle, divisor, x: divisor != 0 ? p.x / (p.inPanicDistance ? 1 : divisor) : 0, y: divisor != 0 ? p.y / (p.inPanicDistance ? 1 : divisor) : 0 };
+                return unit;
+            })
+
+            // did any predators kill the organism?
+            const predatorsInBloodCircle = predatorInfluence.filter(v => v.inBloodCircle).length;
+
+            if (predatorsInBloodCircle) {
+                console.log(`********** I'm dead ************ ${organism.id} (${cohort.reduce((a, o) => a += o.status == organismStatuses.alive ? 1 : 0, 0)} left out of ${cohort.length})`);
+                defaultReturn.status = organismStatuses.dead;
+                return defaultReturn;
             };
 
-            function rotate(point, rad) {
-                // x2=cosβx1−sinβy1
-                // y2=sinβx1+cosβy1
+            // now let's deal with the cohort
+            // *****************************************************
+            const unitOrientation = { x: Math.cos(organism.orientation), y: Math.sin(organism.orientation) };
 
-                const x2 = Math.cos(rad) * point.x - Math.sin(rad) * point.y;
-                const y2 = Math.sin(rad) * point.x + Math.cos(rad) * point.y;
+            // the organism is attraction to the visible cohort
+            const rawCohortInfluence = calculateInfluence(organism, cohort, forceDirections.attraction, organism.personalSpace);
+            const cohortInfluence = rawCohortInfluence.map(c => {
+                const x = c.x;
+                const y = c.y;
+                const distance = c.distance;
+                const divisor = distance * distance / 50; // influence is inversely proportional to the square of the distance
+                const unit = { from: c.from, to: c.to, vx: c.x, vy: c.y, inBloodCircle: c.inBloodCircle, divisor, x: divisor != 0 ? x / (c.inPersonalSpace ? 1 : divisor) : 0, y: divisor != 0 ? y / (c.inPersonalSpace ? 1 : divisor) : 0 };
 
-                return { x: x2, y: y2 };
-            };
+                return unit;
+            })
 
-            function rand(min, max) {
-                const result = Math.floor(Math.random() * (max - min + 1)) + (min);
-                return result;
-            }
-            // put 0,0 in the middle of the screen
-            ctx.translate(canvasWidth / 2, canvasHeight / 2);
+            const rawPreyInfluence = calculateInfluence(organism, prey, forceDirections.attraction, 0);
+            const preyInfluence = rawPreyInfluence.map(c => {
+                const x = c.x;
+                const y = c.y;
+                const distance = c.distance;
+                const divisor = distance * distance * distance / 10000; // influence is inversely proportional to the cube of the distance
+                const unit = { from: c.from, to: c.to, vx: c.x, vy: c.y, inBloodCircle: c.inBloodCircle, divisor, x: divisor != 0 ? x / (c.inPersonalSpace ? 1 : divisor) : 0, y: divisor != 0 ? y / (c.inPersonalSpace ? 1 : divisor) : 0 };
+                return unit;
+            })
 
-            function initialize() {
-                // erase the screen to the background color
-                ctx.fillStyle = backgroundColor;
-                ctx.fillRect(-(canvasWidth / 2), -(canvasHeight / 2), canvasWidth, canvasHeight);
+            const vectors = predatorInfluence.concat(cohortInfluence, preyInfluence);
 
-                preyList.length=0;
-                predatorList.length=0;
-                
-                for (let i = 0; i < preyCount; i++) {
-                    const prey = new Prey(i);
-                    preyList.push(prey);
-                }
+            const sum = vectors.reduce((a, v) => ({ x: a.x + v.x, y: a.y + v.y }), { x: 0, y: 0 });
+            const orientation = newOrientation(organism.orientation, sum, organism.turnStep);
 
-                preyList.forEach(prey => console.log(`id: ${prey.id}, x:${prey.x}, y:${prey.y}, orientation:${prey.orientation}`));
+            const moveVector = { x: unitOrientation.x * organism.maxMoveLength, y: unitOrientation.y * organism.maxMoveLength };
+            const x = boundsCheck(organism.x + moveVector.x, organism.minX, organism.maxX);
+            const y = boundsCheck(organism.y + moveVector.y, organism.minY, organism.maxY);
+            const status = organism.status;
 
-                for (let i = 0; i < predatorCount; i++) {
-                    const predator = new Predator(i);
-                    predatorList.push(predator);
-                    console.log(predator);
-                }
+            return { x, y, orientation, status };
+        }
 
-            }
-
-            // calculate where the critter should point in the next step of simulation
-            function newOrientation(orientation, sum, turnStep) {
-                // if there is no motivation to turn, you're probably pointed away from all the action, so turn around
-                if( sum.x == 0 && sum.y == 0)
-                    sum = { x: 5, y: 5 };
-                else
-                    sum = rotate(sum, -orientation); // this makes the orientationToForceAngle maths easier
-
-                const unitOrientation = { x: 1, y: 0 }; // this makes the orientationToForceAngle maths easier
-                const orientationToForceAngle = Math.sign(sum.y - unitOrientation.y) *
-                    Math.acos(
-                        (sum.x || sum.y) ?
-                            Math.round((sum.x * unitOrientation.x + sum.y * unitOrientation.y) / Math.sqrt(sum.x * sum.x + sum.y * sum.y) * 10000) / 10000 :
-                            0);
-
-                let changeInOrientation = 0;
-                if (Math.abs(orientationToForceAngle) <= turnStep) {
-                    changeInOrientation = orientationToForceAngle;
-                } else {
-                    changeInOrientation = Math.sign(orientationToForceAngle) * turnStep;
-                }
-                let newOrientation = (orientation + changeInOrientation);
-                if(newOrientation < -Math.PI) newOrientation += 2*Math.PI;
-                if(newOrientation > Math.PI) newOrientation -= 2* Math.PI;
-                //console.log(`old: ${orientation}, new: ${newOrientation}, otfa: ${orientationToForceAngle}, uo: (${unitOrientation.x},${unitOrientation.y}), sum: (${sum.x}, ${sum.y})`);    
-
-                return newOrientation;
+        class Drawable {
+            constructor(id, x, y, orientation, sphereOfControl, fillStyle, strokeStyle) {
+                this.id = id;
+                this.sphereOfControl = sphereOfControl;
+                this.fillStyle = fillStyle;
+                this.strokeStyle = strokeStyle;
+                this.minX = -(canvasWidth / 2) + sphereOfControl;
+                this.maxX = (canvasWidth / 2) - sphereOfControl;
+                this.minY = -(canvasHeight / 2) + sphereOfControl;
+                this.maxY = (canvasHeight / 2) - sphereOfControl;
+                this.x = x !== undefined ? x : rand(this.minX, this.maxX);
+                this.y = y !== undefined ? y : rand(this.minY, this.maxY);
+                this.status = organismStatuses.alive;
+                this.orientation = degToRad(orientation !== undefined ? orientation : rand(-179, 180));
+                this.boundCheck();
             }
 
-            class Drawable {
-                constructor(id, x, y, orientation, boundingRadius, fillStyle, strokeStyle) {
-                    this.id = id;
-                    this.boundingRadius = boundingRadius;
-                    this.fillStyle = fillStyle;
-                    this.strokeStyle = strokeStyle;
-                    this.minX = -(canvasWidth / 2) + boundingRadius;
-                    this.maxX = (canvasWidth / 2) - boundingRadius;
-                    this.minY = -(canvasHeight / 2) + boundingRadius;
-                    this.maxY = (canvasHeight / 2) - boundingRadius;
-                    this.x = x !== undefined ? x : rand(this.minX, this.maxX);
-                    this.y = y !== undefined ? y : rand(this.minY, this.maxY);
-                    this.orientation = degToRad(orientation !== undefined ? orientation : rand(-179, 180));
-                    this.boundCheck();
-                }
+            drawBoundingCircle(fillStyleMaker, strokeStyleMaker) {
+                let alpha = this.status == organismStatuses.alive ? 1 : 0.005;
+                let fontHeight = 16;
+                let fontWidth = 17;
+                ctx.fillStyle = fillStyleMaker(alpha);
+                ctx.strokeStyle = strokeStyleMaker(alpha);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.sphereOfControl, degToRad(0), degToRad(360), false);
+                ctx.fill();
+                ctx.stroke();
 
-                drawBoundingCircle(fillStyle, strokeStyle) {
-                    let fontHeight = 16;
-                    let fontWidth = 17;
-                    ctx.fillStyle = fillStyle;
-                    ctx.strokeStyle = strokeStyle;
-                    ctx.beginPath();
-                    ctx.arc(this.x, this.y, this.boundingRadius, degToRad(0), degToRad(360), false);
-                    ctx.fill();
-                    ctx.stroke();
-
+                if (this.status != organismStatuses.dead) {
                     // the beak has 3 points p1, p2, p3
-                    const p1 = rotate({ x: 0, y: - this.boundingRadius }, this.orientation);
-                    const p2 = rotate({ x: 0, y: this.boundingRadius }, this.orientation);
-                    const p3 = rotate({ x: this.boundingRadius, y: 0 }, this.orientation);
+                    const p1 = rotate({ x: 0, y: - this.sphereOfControl }, this.orientation);
+                    const p2 = rotate({ x: 0, y: this.sphereOfControl }, this.orientation);
+                    const p3 = rotate({ x: this.sphereOfControl, y: 0 }, this.orientation);
 
                     ctx.beginPath();
                     ctx.moveTo(this.x + p1.x, this.y + p1.y);
                     ctx.lineTo(this.x + p2.x, this.y + p2.y);
                     ctx.lineTo(this.x + p3.x, this.y + p3.y);
-                    ctx.fillStyle = beakColor;
+                    ctx.fillStyle = beakStyleMaker(alpha);
                     ctx.fill();
+                }
 
-                    ctx.font = '18px arial';
-                    ctx.fillStyle = 'rgb(255, 255, 255)';
-                    ctx.fillText(this.id, this.x - fontWidth / 2, this.y + fontHeight / 2);
-                }
-                draw() {
-                    this.drawBoundingCircle(this.fillStyle, this.strokeStyle);
-                }
-                erase() {
-                    this.drawBoundingCircle(backgroundColor, backgroundColor);
-                }
-                moveBy(xDiff, yDiff) {
-                    this.moveTo(this.x + xDiff, this.y + yDiff);
-                }
-                moveTo(x, y) {
-                    this.x = x;
-                    this.y = y;
+                ctx.font = '18px arial';
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.fillText(this.id, this.x - fontWidth / 2, this.y + fontHeight / 2);
+            }
+            draw() {
+                this.drawBoundingCircle(this.fillStyle, this.strokeStyle);
+            }
+            erase() {
+                this.drawBoundingCircle(backgroundColorMaker, backgroundColorMaker);
+            }
+            move(prey, cohort, predators) {
+                const updates = calculateDelta(this, prey, cohort, predators);
+                this.orientation = updates.orientation;
+                this.x = updates.x;
+                this.y = updates.y;
+                this.status = updates.status;
+            }
+            moveBy(xDiff, yDiff) {
+                this.moveTo(this.x + xDiff, this.y + yDiff);
+            }
+            moveTo(x, y) {
+                this.x = x;
+                this.y = y;
 
-                    this.boundCheck();
-                }
-                boundCheck() {
-                    this.x = this.x > this.maxX ? this.maxX : this.x;
-                    this.x = this.x < this.minX ? this.minX : this.x;
-                    this.y = this.y > this.maxY ? this.maxY : this.y;
-                    this.y = this.y < this.minY ? this.minY : this.y;
-                }
+                this.boundCheck();
+            }
+            boundCheck() {
+                this.x = this.x > this.maxX ? this.maxX : this.x;
+                this.x = this.x < this.minX ? this.minX : this.x;
+                this.y = this.y > this.maxY ? this.maxY : this.y;
+                this.y = this.y < this.minY ? this.minY : this.y;
+            }
+        }
+
+
+        class Prey extends Drawable {
+            // we will represent prey as a circle of radius "sphereOfControl"
+
+            constructor(id, x, y, orientation) {
+                super(id, x, y, orientation, preyRadius, preyFillStyleMaker, preyStrokeStyleMaker);
+                this.maxMoveLength = 2
+                this.viewAngle = degToRad(270);
+                this.turnStep = degToRad(4); // degrees maximum turn per step
+                // we want the distance between unit centers to be 3 sphereOfControl
+                this.personalSpace = 4 * this.sphereOfControl;
+                this.panicDistance = 10 * this.sphereOfControl;
+            }
+        }
+
+        class Predator extends Drawable {
+            // we will represent prey as a circle of radius "sphereOfControl"
+
+            constructor(id, x, y, orientation) {
+                super(id, x, y, orientation, predatorRadius, predatorFillStyleMaker, predatorStrokeStyleMaker);
+
+                this.maxMoveLength = 3;
+                this.viewAngle = degToRad(180);
+                this.turnStep = degToRad(2); // degrees maximum gurn per step
+                // we want the distance between unit centers to be 3 sphereOfControl
+                this.personalSpace = 3 * this.sphereOfControl;
+                this.panicDistance = 7 * this.sphereOfControl;
+            }
+        }
+
+        let simCount = 5;
+
+        function innerLoop(movesLeft) {
+            if (movesLeft < 1) {
+                requestAnimationFrame(outerLoop);
+                return;
             }
 
+            preyList.forEach((prey) => {
+                prey.erase();
+                // prey.move();
+                const updates = calculateDelta(prey, preyList, [], predatorList);
+                prey.orientation = updates.orientation;
+                prey.x = updates.x;
+                prey.y = updates.y;
+                prey.status = updates.status;
+                prey.draw();
+            });
 
-            class Prey extends Drawable {
-                // we will represent prey as a circle of radius "boundingRadius"
+            predatorList.forEach((predator) => {
+                predator.erase();
+                const updates = calculateDelta(predator, predatorList, preyList, []);
+                predator.orientation = updates.orientation;
+                predator.x = updates.x;
+                predator.y = updates.y;
+                predator.status = updates.status;
+                // predator.move();
+                predator.draw();
+            });
 
-                constructor(id, x, y, orientation) {
-                    super(id, x, y, orientation, preyRadius, preyFillStyle, preyStrokeStyle);
-                    this.maxMoveLength = 2
-                    this.viewAngle = degToRad(270);
-                    this.turnStep = degToRad(4); // degrees maximum turn per step
-                }
+            requestAnimationFrame(() => innerLoop(--movesLeft));
+        }
 
-                draw() {
-                    super.draw();
-                    /*
-                    const orientation = this.orientation;
-                    const viewAngle = this.viewAngle;
+        function outerLoop() {
+            if (simCount-- < 1) return;
 
-                    preyList.forEach(u => {
-                        const angleToOther = Math.atan((u.y - this.y) / (u.x - this.x));
-                        const inView = Math.abs(orientation - angleToOther) <= Math.abs(orientation - viewAngle / 2)
+            initialize();
 
-                        ctx.beginPath();
-                        ctx.moveTo(this.x + 100 * Math.cos(orientation), this.y + 100 * Math.sin(orientation));
-                        ctx.lineTo(this.x, this.y);
-                        ctx.stroke();
+            innerLoop(movesPerSimulation);
+        }
 
-                        ctx.beginPath();
-                        ctx.moveTo(this.x, this.y);
-                        //ctx.lineTo(this.x - 50 * Math.sin(orientation + viewAngle / 2), this.y + 50 * Math.cos(orientation + viewAngle / 2));
-                        ctx.lineTo(this.x + 50 * Math.cos(orientation + viewAngle / 2), this.y + 50 * Math.sin(orientation + viewAngle / 2));
-                        ctx.arc(this.x, this.y, 50, orientation + viewAngle / 2, orientation - viewAngle / 2, true);
-                        ctx.lineTo(this.x, this.y);
-                        ctx.fillStyle = "rgba(100,100,255,0.5)";
-                        ctx.fill();
+        outerLoop();
 
-                        ctx.beginPath();
-                        ctx.moveTo(this.x, this.y);
-                        ctx.lineTo(this.x + 50 * Math.cos(orientation - viewAngle / 2), this.y + 50 * Math.sin(orientation - viewAngle / 2));
-                        ctx.lineTo(this.x + 50 * Math.cos(orientation + viewAngle / 2), this.y + 50 * Math.sin(orientation + viewAngle / 2));
-                        ctx.lineTo(this.x, this.y);
-                        ctx.strokeStyle = "rgba(255,100,100,1)";
-                        ctx.stroke();
-
-
-                        console.log(`id: ${this.id}, orientation: ${this.orientation}, viewAngle: ${viewAngle}, x: ${this.x}, y: ${this.y}, pointer.x: ${this.x + 100 * Math.sin(orientation)}, pointer.y: ${this.y + 100 * Math.cos(orientation)}`);
-                    });
-                    */
-                }
-
-                move() {
-                    // let every other prey influence this prey in inverse
-                    // proportion to the distance between them
-
-                    // prey attempt to maintain a constant distance of one radius 
-                    // from all other prey
-
-                    // prey can move at most maxMoveLength per move only in the direction of orientation.
-                    // prey can turn at most "turnstep" (e.g.: 5) degrees at a time
-
-                    // prey cannot move off the screen
-
-                    const orientation = this.orientation;
-                    const unitOrientation = { x: Math.cos(orientation), y: Math.sin(orientation) };
-
-                    // first the attraction to the visible flock
-                    const vectors = preyList.reduce((a, u) => {
-
-                        if(u === this) return a; // ignore attraction to self
-
-                        // we want the distance between unit centers to be 3 boundingRadius
-                        const requiredOffsetDistance = 3 * this.boundingRadius;
-                        // determine if the other flock member is in view (within 1/2 view angle of orientation)
-                        const vectorToOther = { x: u.x - this.x, y: u.y - this.y };
-                        const angleToOther = Math.acos((vectorToOther.x) / Math.sqrt(vectorToOther.x * vectorToOther.x + vectorToOther.y * vectorToOther.y)) * Math.sign(vectorToOther.y);
-                        const unitOther = { x: Math.cos(angleToOther), y: Math.sin(angleToOther) };
-                        const orientationToOther = Math.acos((unitOther.x * unitOrientation.x + unitOther.y * unitOrientation.y));
-                        const inView = Math.abs(orientationToOther) <= Math.abs(this.viewAngle / 2);
-
-                        /*
-                        console.log(`id: ${this.id}@(${this.x},${this.y}), other: ${u.id}@(${u.x},${u.y}), orientationToOther: ${orientationToOther}, orientation: ${orientation}:${unitOrientation}, angleToOther: ${angleToOther}:${unitOther}, inView: ${inView}`, a);
-    
-                        ctx.beginPath();
-                        ctx.moveTo(this.x + 1000 * Math.cos(angleToOther), this.y + 1000 * Math.sin(angleToOther));
-                        ctx.lineTo(this.x, this.y);
-                        ctx.strokeStyle = inView ? 'rgba(0,255,0,0.3' : 'rgba(255,0,0,0.3   )';
-                        ctx.stroke();
-    
-                        let fontHeight = 36;
-                        let fontWidth = 25;
-    
-                        //ctx.font = '36px arial';
-                        //ctx.strokeText(u.id, this.x + 100 * Math.cos(angleToOther) - fontWidth / 2, this.y + 100 * Math.sin(angleToOther) + fontHeight / 2);
-                        */
-
-
-                        if (inView) {
-                            const centerToCenter = { x: u.x - this.x, y: u.y - this.y };
-                            const c2Cdistance = Math.sqrt(centerToCenter.x * centerToCenter.x + centerToCenter.y * centerToCenter.y);
-                            const requiredOffsetVector = { x: centerToCenter.x * requiredOffsetDistance / c2Cdistance, y: centerToCenter.y * requiredOffsetDistance / c2Cdistance };
-                            const offsetToCenter = {x:centerToCenter.x - requiredOffsetVector.x, y:centerToCenter.y-requiredOffsetVector.y};
-                            const distance = Math.sqrt(offsetToCenter.x * offsetToCenter.x + offsetToCenter.y*offsetToCenter.y);
-                            const vector = { from: this.id, to: u.id, centerToCenter, c2Cdistance, requiredOffsetVector, angleToOther, x: distance > 0 ? Math.round(offsetToCenter.x) : 0, y: distance > 0 ? Math.round(offsetToCenter.y) : 0 };
-                            vector.tooClose = c2Cdistance < requiredOffsetDistance;
-
-                            //console.log(vector);
-
-                            a.push(vector);
-                        }
-
-                        return a;
-                    }, []);
-
-                    // now aversion to predatorList
-                    predatorList.forEach((u) => {
-                        // we want the distance between unit centers to be 3 boundingRadii
-                        const panicDistance = 7 * this.boundingRadius;
-                        let centerToCenter = { x: this.x - u.x, y: this.y - u.y };
-                        let distance = Math.sqrt(centerToCenter.x * centerToCenter.x + centerToCenter.y * centerToCenter.y);
-                        let vector = { from: u.id, to: this.id, centerToCenter, distance, x: distance > 0 ? Math.round(centerToCenter.x) : 0, y: distance > 0 ? Math.round(centerToCenter.y) : 0 };
-                        vector.tooClose = distance < panicDistance;
-
-                        vectors.push(vector);
-                    });
-
-                    let scaledVectors = vectors.map((v) => {
-                        // effectively multiply forces by a constant by dividing scale factor by the same amount - this separates the signal from the noise.
-                        let scale = (v.x * v.x + v.y * v.y) / 50;
-                        const unit = { from: v.from, to: v.to, vx: v.x, vy: v.y, scale, x: scale != 0 ? v.x / (v.tooClose ? 1 : scale) : 0, y: scale != 0 ? v.y / (v.tooClose ? 1 : scale) : 0 };
-/*                        
-                        console.log(`id: ${this.id}@(${this.x},${this.y}), other: ${v.from}@(${v.x},${v.y}), scale: ${scale}`);
-
-                        ctx.beginPath();
-                        ctx.moveTo(this.x, this.y);
-                        ctx.lineTo(this.x + unit.x * 1000, this.y + unit.y * 1000);
-                        ctx.strokeStyle = 'rgba(100,100,255,0.8';
-                        ctx.stroke();
-
-                        const fontHeight = 36;
-                        const fontWidth = 25;
-
-                        ctx.font = '12px arial';
-                        ctx.strokeText(`${unit.from}@(${Math.round(unit.x*100)/100},${Math.round(unit.y*100)/100})`, this.x + 100 * Math.cos(v.angleToOther) - fontWidth / 2, this.y + 100 * Math.sin(v.angleToOther) + fontHeight / 2);
-*/
-                        
-                        return unit;
-                    });
-                    //console.log('scaledVectors:', scaledVectors);
-
-                    const sum = scaledVectors.reduce((a, v) => ({ x: a.x + v.x, y: a.y + v.y }), { x: 0, y: 0 });
-/*
-                    console.log(`id: ${this.id}@(${this.x},${this.y}), sum: (${sum.x},${sum.y})`);
-
-                    ctx.beginPath();
-                    ctx.moveTo(this.x, this.y);
-                    ctx.lineTo(this.x + sum.x * 1000, this.y + sum.y * 1000);
-                    ctx.strokeStyle = 'rgba(255,255,255,0.8';
-                    ctx.stroke();
-*/                    
-                    this.orientation = newOrientation(this.orientation, sum, this.turnStep);
-
-                    const moveVector = { x: unitOrientation.x * this.maxMoveLength, y: unitOrientation.y * this.maxMoveLength };
-                    this.moveBy(moveVector.x, moveVector.y);
-                }
-            }
-
-            class Predator extends Drawable {
-                // we will represent prey as a circle of radius "boundingRadius"
-
-
-                constructor(id, x, y, orientation) {
-                    super(id, x, y, orientation, predatorRadius, predatorFillStyle, predatorStrokeStyle);
-
-                    this.maxMoveLength = 3;
-                    this.viewAngle = degToRad(180);
-                    this.turnStep = degToRad(1); // degrees maximum gurn per step
-                }
-
-                move() {
-                    // predators are attracted to all prey just as prey are attracted to each other in inverse proportion to the distance
-                    // predators cannot move off screen
-                    const orientation = this.orientation;
-                    /*
-                                    let vectors = preyList.map((u) => {
-                                        let centerToCenter = { x: u.x - this.x, y: u.y - this.y };
-                                        let distance = Math.sqrt(centerToCenter.x * centerToCenter.x + centerToCenter.y * centerToCenter.y);
-                                        let vector = { from: u.id, to: this.id, centerToCenter, distance, x: distance > 0 ? Math.round((centerToCenter.x)) : 0, y: distance > 0 ? Math.round((centerToCenter.y)) : 0 };
-                    
-                                        return vector;
-                                    });
-                    */
-                    let vectors = preyList.reduce((a, u) => {
-                        const vectorToOther = { x: u.x - this.x, y: u.y - this.y };
-                        const angleToOther = Math.acos((vectorToOther.x) / Math.sqrt(vectorToOther.x * vectorToOther.x + vectorToOther.y * vectorToOther.y)) * Math.sign(vectorToOther.y);
-                        const unitOther = { x: Math.cos(angleToOther), y: Math.sin(angleToOther) };
-                        const unitOrientation = { x: Math.cos(orientation), y: Math.sin(orientation) };
-                        const orientationToOther = Math.acos((unitOther.x * unitOrientation.x + unitOther.y * unitOrientation.y));
-                        const inView = Math.abs(orientationToOther) <= Math.abs(this.viewAngle / 2);
-
-                        if (inView) {
-                            let centerToCenter = { x: u.x - this.x, y: u.y - this.y };
-                            let distance = Math.sqrt(centerToCenter.x * centerToCenter.x + centerToCenter.y * centerToCenter.y);
-                            let vector = { from: u.id, to: this.id, centerToCenter, distance, x: distance > 0 ? Math.round((centerToCenter.x)) : 0, y: distance > 0 ? Math.round((centerToCenter.y)) : 0 };
-
-                            a.push(vector);
-                        }
-
-                        return a;
-                    }, []);
-
-
-                    // did we catch any?
-                    vectors.forEach((v) => {
-                        // we don't handle the case where prey is hiding in a corner of the screen
-                        if (Math.floor(v.distance) <= predatorRadius - preyRadius) {
-                            console.log(`********** got 'im ************ ${v.from} (${preyList.length} left out of ${preyCount}`);
-                            preyList = preyList.filter((u) => u.id != v.from);
-                        }
-                    });
-
-                    // What's attracting my attention now???
-                    let scaledVectors = vectors.map((v) => {
-                        // let's be exponentially more attracted to closer prey
-                        let distance = Math.sqrt(v.x * v.x + v.y * v.y)
-                        let scale = distance * distance * distance / 10000;
-                        return { from: v.from, to: v.to, vx: v.x, vy: v.y, scale, x: scale != 0 ? v.x / scale : 0, y: scale != 0 ? v.y / scale : 0 };
-                    });
-
-                    let sum = scaledVectors.reduce((a, v) => ({ x: a.x + v.x, y: a.y + v.y }), { x: 0, y: 0 });
-
-                    const unitOrientation = {x: Math.cos(this.orientation), y: Math.sin(this.orientation)};
-                    this.orientation = newOrientation(this.orientation, sum, this.turnStep);
-
-                    let forceScale = Math.sqrt(sum.x * sum.x + sum.y * sum.y);
-                    let moveVector = unitOrientation;
-
-                    if (forceScale > this.maxMoveLength) {
-                        // scale it back
-                        moveVector = { x: unitOrientation.x * this.maxMoveLength, y: unitOrientation.y * this.maxMoveLength };
-                    } else {
-                        moveVector = { x: unitOrientation.x * forceScale, y: unitOrientation.y * forceScale };
-                    }
-
-                    this.moveBy(moveVector.x, moveVector.y);
-                }
-            }
-/*
-            const tests = [
-            {orientation : 0, sum: {x:5, y:5}, turnStep: degToRad(5)},
-            {orientation : 0, sum: {x:5, y:-5}, turnStep: degToRad(5)},
-            {orientation : 0, sum: {x:-5, y:5}, turnStep: degToRad(5)},
-            {orientation : 0, sum: {x:-5, y:-5}, turnStep: degToRad(5)},
-            {orientation : -0.78, sum: {x:5, y:5}, turnStep: degToRad(5)},
-            {orientation : 0.78, sum: {x:5, y:-5}, turnStep: degToRad(5)},
-            {orientation : -2.0, sum: {x:-5, y:5}, turnStep: degToRad(5)},
-            {orientation : 2.0, sum: {x:-5, y:-5}, turnStep: degToRad(5)}
-            ]
-            tests.forEach((test, i) => {
-                console.log('**********************************');
-                let stepCount = 0;
-                    for (let currentO = test.orientation, nextOrientation, notConverged = true; notConverged;) {
-                        nextOrientation = newOrientation(currentO, test.sum, test.turnStep);
-                        console.log(`test: ${i}, step: ${stepCount++}, orientation: ${currentO}, sum: (${test.sum.x}, ${test.sum.y}), newOrientation: ${nextOrientation}`);
-                        notConverged = Math.round(nextOrientation * 1000) / 1000 != Math.round(currentO * 1000) / 1000;
-                        currentO = nextOrientation;
-                    }
-                });
-*/
-
-                let simCount = 5;
-
-            function innerLoop(movesLeft) {
-                if(movesLeft < 1) {
-                    requestAnimationFrame(outerLoop);
-                    return;
-                }
-
-                preyList.forEach((prey) => {
-                    prey.erase();
-                    prey.move();
-                    prey.draw();
-                });
-
-                predatorList.forEach((predator) => {
-                    predator.erase();
-                    predator.move();
-                    predator.draw();
-                });
-
-                requestAnimationFrame(()=>innerLoop(--movesLeft));
-            }
-
-            function outerLoop() {
-                if(simCount-- < 1) return;
-
-                initialize();
-
-                innerLoop(movesPerSimulation);
-            }
-
-            outerLoop();
-            
-    /*
-        ctx.beginPath();
-        ctx.moveTo(-100, 100);
-        ctx.lineTo(100, 100);
-        ctx.lineTo(100, -100);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(-5, 5);
-        ctx.lineTo(5, 5);
-        ctx.lineTo(5, -5);
-        ctx.lineTo(-5, -5);
-        ctx.fillStyle = 'rgba(255,255,255,1)';
-        ctx.fill();
-    
-        ctx.beginPath();
-        ctx.arc(0, 0, 100, 0, 2 * Math.PI, false);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.stroke();
-    
-        let orientation = degToRad(0);
-        let angle = degToRad(1);
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(100 * Math.cos(orientation + angle), 100 * Math.sin(orientation + angle));
-        ctx.lineTo(100 * Math.cos(orientation - angle), 100 * Math.sin(orientation - angle));
-        console.log(`orientation: ${orientation}, angle: ${angle}, p1: {${100 * Math.cos(orientation + angle)},${100 * Math.sin(orientation + angle)}}, p2: {${100 * Math.cos(orientation - angle)},${100 * Math.sin(orientation - angle)}}`);
-        ctx.arc(0, 0, 100, orientation + angle, orientation - angle, true);
-        ctx.lineTo(0, 0);
-        ctx.fillStyle = 'rgba(150,150,255,0.7)';
-        ctx.fill();
-    */
     </script>
 </body>
 
